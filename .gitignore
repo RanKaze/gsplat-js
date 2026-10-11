@@ -134,3 +134,6 @@ dist
 playground/
 .venv/
 .claude/
+
+# Kolid: standalone browser bundle build output
+dist-bundle/
