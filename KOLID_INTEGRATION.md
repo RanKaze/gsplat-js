@@ -40,6 +40,23 @@ nodes/web/
 - Worker 通过上游的 `?worker&inline` 语法内联为 blob URL
 - WASM 通过 `SINGLE_FILE=1` 编译内联（`src/wasm/*.js` 已随仓库提交，无需 emscripten 重新编译）
 
+## Kolid 本地补丁（升上游版本时必须重新打）
+
+上游源码与 Kolid 交付版之间**共有两处**功能性差异：
+
+| 文件 | 补丁 | 为什么 |
+|---|---|---|
+| `src/renderers/WebGLRenderer.ts`（`getContext("webgl2", ...)`） | 增加 `preserveDrawingBuffer: true` | `gaussian_node.html` 的 `takeScreenshotAndClose()` 是在事件回调里（rAF 之外）把 WebGL canvas `drawImage` 到临时 2D canvas 再 `toDataURL`。没有这个属性时按 WebGL 规范只能拿到已被清空的缓冲区，节点收到的是一张纯黑 PNG |
+| `src/controls/OrbitControls.ts`（`update()` 键盘段） | ① 帧移动量按 dt 归一化到 60 Hz（`frameScale = min(dt_s, 0.1) * 60`）；② 按住 Shift 时移动速度 ×4；③ `E`/`Q` 从“水平旋转”改为**垂直平移**（沿世界 −Y / +Y，本视图世界 Y 向下所以 `up = (0,-1,0)`），R/F 俯仰旋转保留 | ①原实现每帧固定步长，高刷屏/headless 下移动速度随帧率漂移；②③按用户要求 WASDQE 移动方案（Q 下 E 上、Shift 加速） |
+
+> 2026-10-10 那次改造成 submodule 构建时 `preserveDrawingBuffer` 这颗补丁被漏掉了，2026-10-11 补回。
+> 上述 WebGLRenderer 差异已通过复现旧打包管线（esbuild 直接把官方 `dist/index.es.js` 打成 IIFE）与旧 bundle 逐行对比确认：
+> 归一化空白后整份文件只差 10 个 hunk，其余 9 处全是 esbuild 版本降级写法（`static{}` ↔ 类后赋值、
+> `??=` ↔ `?? (…)`、类名形式）和入口文件名/注释。`OrbitControls` 的 ①②③ 是 2026-10-11 之后新加的功能
+> 补丁，**不在**那次逐 hunk 对比覆盖范围内。
+
+`git checkout` 到新的上游 tag 会把这两处都冲掉，所以升级流程里必须重打（见下一节）。
+
 ## 重新构建步骤
 
 ```bash
@@ -63,8 +80,14 @@ cp dist-bundle/gsplat-bundle.js ../js/gsplat-bundle.js
 ```bash
 cd nodes/web/gsplat-js
 git fetch && git checkout <新版本 tag/commit>
+# 1) 重新打 Kolid 本地补丁（见上一节，共两处，checkout 会全部冲掉）：
+#    a. src/renderers/WebGLRenderer.ts 的 getContext("webgl2", ...) 里补回 preserveDrawingBuffer: true
+#    b. src/controls/OrbitControls.ts 的 update() 键盘段：dt 归一化 + Shift 加速 + E/Q 垂直平移
+# 2) 确认补丁已在产物里（应打印 preserveDrawingBuffer:!0 与 ShiftLeft）：
 npm install
 ./node_modules/.bin/vite build --config vite.bundle.config.js
+grep -o 'getContext("webgl2",{[^}]*}' dist-bundle/gsplat-bundle.js
+grep -c 'ShiftLeft' dist-bundle/gsplat-bundle.js
 cp dist-bundle/gsplat-bundle.js ../js/gsplat-bundle.js
 # 回到项目根目录提交新的 submodule 指针
 cd ../../.. && git add nodes/web/gsplat-js nodes/web/js/gsplat-bundle.js
@@ -90,6 +113,12 @@ cd ../../.. && git add nodes/web/gsplat-js nodes/web/js/gsplat-bundle.js
 
 ## 版本历史
 
+- **2026-10-11（2）**：`OrbitControls.ts` 键盘移动补丁 —— WASDQE 移动方案：`E`/`Q` 垂直平移
+  （世界 −Y/+Y），Shift ×4 加速，帧移动量按 dt 归一化到 60 Hz。同时 `gaussian_node.html` 的
+  `applyFocalFromIntrinsics()` 改为单一各向同性缩放（`min(w/W, h/H)`），修复画布宽高比 ≠ 源图
+  宽高比时 fx≠fy 造成的画面拉伸（实测拉伸比 1.2458 → 1.0000）。
+- **2026-10-11**：补回 10-10 改造时漏掉的 `preserveDrawingBuffer: true`（截图路径全黑）。
+  同时用「复现旧 esbuild 管线 + 逐 hunk 对比」审计出旧 bundle 的全部手工补丁清单：仅此一处。
 - **2026-10-10**：替换手工打包的旧 bundle（2026-02-06 产出的 gsplat.js 旧版），
   改为 submodule + 自建 IIFE 构建。上游 `huggingface/gsplat.js` v1.2.9（commit `dbe93f6`）。
   旧文件备份于 `js/gsplat-bundle.js.old-20260206`。

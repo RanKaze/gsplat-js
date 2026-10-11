@@ -219,8 +219,16 @@ class OrbitControls {
             return (1 - t) * a + t * b;
         };
 
+        let lastTime = performance.now();
+
         this.update = () => {
             isUpdatingCamera = true;
+
+            const now = performance.now();
+            // Movement per frame, normalised to a 60 Hz frame so the speed does not
+            // depend on the display refresh rate. 0.1 s clamp covers tab switches.
+            const frameScale = Math.min((now - lastTime) / 1000, 0.1) * 60;
+            lastTime = now;
 
             alpha = lerp(alpha, desiredAlpha, this.dampening);
             beta = lerp(beta, desiredBeta, this.dampening);
@@ -237,21 +245,23 @@ class OrbitControls {
             const ry = Math.atan2(direction.x, direction.z);
             camera.rotation = Quaternion.FromEuler(new Vector3(rx, ry, 0));
 
-            const moveSpeed = 0.025;
+            const moveSpeed = 0.025 * (keys["ShiftLeft"] || keys["ShiftRight"] ? 4 : 1) * frameScale;
             const rotateSpeed = 0.01;
 
             const R = Matrix3.RotationFromQuaternion(camera.rotation).buffer;
             const forward = new Vector3(-R[2], -R[5], -R[8]);
             const right = new Vector3(R[0], R[3], R[6]);
+            // In this viewer world Y points down, so "up" is -Y.
+            const up = new Vector3(0, -1, 0);
 
             if (keys["KeyS"]) desiredTarget = desiredTarget.add(forward.multiply(moveSpeed));
             if (keys["KeyW"]) desiredTarget = desiredTarget.subtract(forward.multiply(moveSpeed));
             if (keys["KeyA"]) desiredTarget = desiredTarget.subtract(right.multiply(moveSpeed));
             if (keys["KeyD"]) desiredTarget = desiredTarget.add(right.multiply(moveSpeed));
 
-            // Add rotation with 'e' and 'q' for horizontal rotation
-            if (keys["KeyE"]) desiredAlpha += rotateSpeed;
-            if (keys["KeyQ"]) desiredAlpha -= rotateSpeed;
+            // 'e' and 'q' raise and lower the rig
+            if (keys["KeyE"]) desiredTarget = desiredTarget.add(up.multiply(moveSpeed));
+            if (keys["KeyQ"]) desiredTarget = desiredTarget.subtract(up.multiply(moveSpeed));
 
             // Add rotation with 'r' and 'f' for vertical rotation
             if (keys["KeyR"]) desiredBeta += rotateSpeed;

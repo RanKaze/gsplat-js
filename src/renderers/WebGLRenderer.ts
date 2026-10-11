@@ -33,7 +33,10 @@ export class WebGLRenderer {
         canvas.style.background = this._backgroundColor.toHexString();
         this._canvas = canvas;
 
-        this._gl = canvas.getContext("webgl2", { antialias: false }) as WebGL2RenderingContext;
+        // Kolid patch: gaussian_node.html copies the canvas to a 2D context from an
+        // event handler (outside the rAF that renders), which only yields pixels if
+        // the drawing buffer survives the frame. Lost in the 2026-10-10 rebuild.
+        this._gl = canvas.getContext("webgl2", { antialias: false, preserveDrawingBuffer: true }) as WebGL2RenderingContext;
 
         const renderPasses = optionalRenderPasses || [];
         if (!optionalRenderPasses) {
